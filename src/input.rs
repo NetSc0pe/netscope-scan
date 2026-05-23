@@ -16,17 +16,6 @@ pub enum ScanOrder {
     Random,
 }
 
-/// Represents the scripts variant.
-///   - none will avoid running any script, only portscan results will be shown.
-///   - default will run the default embedded nmap script, that's part of RustScan since the beginning.
-///   - custom will read the ScriptConfig file and the available scripts in the predefined folders
-#[derive(Deserialize, Debug, ValueEnum, Clone, PartialEq, Eq, Copy)]
-pub enum ScriptsRequired {
-    None,
-    Default,
-    Custom,
-}
-
 /// Represents the range of ports to be scanned.
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct PortRange {
@@ -60,17 +49,13 @@ fn parse_range(input: &str) -> Result<PortRange, String> {
 
 #[derive(Parser, Debug, Clone)]
 #[command(
-    name = "rustscan",
+    name = "netscope-scan",
     version = env!("CARGO_PKG_VERSION"),
     max_term_width = 120,
     help_template = "{bin} {version}\n{about}\n\nUSAGE:\n    {usage}\n\nOPTIONS:\n{options}",
 )]
 #[allow(clippy::struct_excessive_bools)]
-/// Fast Port Scanner built in Rust.
-/// WARNING Do not use this program against sensitive infrastructure since the
-/// specified server may not be able to handle this many socket connections at once.
-/// - Discord  <http://discord.skerritt.blog>
-/// - GitHub <https://github.com/RustScan/RustScan>
+/// Fast port scanner. Outputs open ports as JSON to stdout.
 pub struct Opts {
     /// A comma-delimited list or newline-delimited file of separated CIDRs, IPs, or hosts to be scanned.
     #[arg(short, long, value_delimiter = ',')]
@@ -88,21 +73,9 @@ pub struct Opts {
     #[arg(short, long)]
     pub no_config: bool,
 
-    /// Hide the banner
-    #[arg(long)]
-    pub no_banner: bool,
-
     /// Custom path to config file
     #[arg(short, long, value_parser)]
     pub config_path: Option<PathBuf>,
-
-    /// Greppable mode. Only output the ports. No Nmap. Useful for grep or outputting to a file.
-    #[arg(short, long)]
-    pub greppable: bool,
-
-    /// Accessible mode. Turns off features which negatively affect screen readers.
-    #[arg(long)]
-    pub accessible: bool,
 
     /// A comma-delimited list or file of DNS resolvers.
     #[arg(long)]
@@ -120,7 +93,7 @@ pub struct Opts {
     pub timeout: u32,
 
     /// The number of tries before a port is assumed to be closed.
-    /// If set to 0, rustscan will correct it to 1.
+    /// If set to 0, it will be corrected to 1.
     #[arg(long, default_value = "1")]
     pub tries: u8,
 
@@ -134,21 +107,9 @@ pub struct Opts {
     #[arg(long, value_enum, ignore_case = true, default_value = "serial")]
     pub scan_order: ScanOrder,
 
-    /// Level of scripting required for the run.
-    #[arg(long, value_enum, ignore_case = true, default_value = "default")]
-    pub scripts: ScriptsRequired,
-
     /// Use the top 1000 ports.
     #[arg(long)]
     pub top: bool,
-
-    /// The Script arguments to run.
-    /// To use the argument -A, end RustScan's args with '-- -A'.
-    /// Example: 'rustscan -t 1500 -a 127.0.0.1 -- -A -sC'.
-    /// This command adds -Pn -vvv -p $PORTS automatically to nmap.
-    /// For things like --script '(safe and vuln)' enclose it in quotations marks \"'(safe and vuln)'\"
-    #[arg(last = true)]
-    pub command: Vec<String>,
 
     /// A list of comma separated ports to be excluded from scanning. Example: 80,443,8080.
     #[arg(short, long, value_delimiter = ',')]
@@ -198,10 +159,7 @@ impl Opts {
             }
         }
 
-        merge_required!(
-            addresses, greppable, accessible, batch_size, timeout, tries, scan_order, scripts,
-            command, udp, no_banner
-        );
+        merge_required!(addresses, batch_size, timeout, tries, scan_order, udp);
     }
 
     fn merge_optional(&mut self, config: &Config) {
@@ -215,7 +173,6 @@ impl Opts {
             }
         }
 
-        // Only use top ports when the user asks for them
         if self.top && config.ports.is_some() {
             self.ports = config.ports.clone();
         }
@@ -230,19 +187,14 @@ impl Default for Opts {
             addresses: vec![],
             ports: None,
             range: None,
-            greppable: true,
             batch_size: 0,
             timeout: 0,
             tries: 0,
             ulimit: None,
-            command: vec![],
-            accessible: false,
             resolver: None,
             scan_order: ScanOrder::Serial,
             no_config: true,
-            no_banner: false,
             top: false,
-            scripts: ScriptsRequired::Default,
             config_path: None,
             exclude_ports: None,
             exclude_addresses: None,
@@ -252,42 +204,33 @@ impl Default for Opts {
 }
 
 /// Struct used to deserialize the options specified within our config file.
-/// These will be further merged with our command line arguments in order to
-/// generate the final Opts struct.
 #[cfg(not(tarpaulin_include))]
 #[derive(Debug, Deserialize)]
 pub struct Config {
     addresses: Option<Vec<String>>,
     ports: Option<Vec<u16>>,
     range: Option<PortRange>,
-    greppable: Option<bool>,
-    accessible: Option<bool>,
     batch_size: Option<usize>,
     timeout: Option<u32>,
     tries: Option<u8>,
     ulimit: Option<usize>,
     resolver: Option<String>,
     scan_order: Option<ScanOrder>,
-    command: Option<Vec<String>>,
-    scripts: Option<ScriptsRequired>,
     exclude_ports: Option<Vec<u16>>,
     exclude_addresses: Option<Vec<String>>,
     udp: Option<bool>,
-    no_banner: Option<bool>,
 }
 
 #[cfg(not(tarpaulin_include))]
 #[allow(clippy::doc_link_with_quotes)]
 #[allow(clippy::manual_unwrap_or_default)]
 impl Config {
-    /// Reads the configuration file with TOML format and parses it into a
-    /// Config struct.
+    /// Reads the configuration file with TOML format and parses it into a Config struct.
     ///
     /// # Format
     ///
     /// addresses = ["127.0.0.1", "127.0.0.1"]
     /// ports = [80, 443, 8080]
-    /// greppable = true
     /// scan_order = "Serial"
     /// exclude_ports = [8080, 9090, 80]
     /// udp = false
@@ -326,7 +269,7 @@ pub fn default_config_path() -> PathBuf {
     let Some(mut config_path) = dirs::config_dir() else {
         panic!("Could not infer config file path.");
     };
-    config_path.push(".rustscan.toml");
+    config_path.push(".netscope-scan.toml");
     config_path
 }
 
@@ -335,7 +278,7 @@ pub fn old_default_config_path() -> PathBuf {
     let Some(mut config_path) = dirs::home_dir() else {
         panic!("Could not infer config file path.");
     };
-    config_path.push(".rustscan.toml");
+    config_path.push(".netscope-scan.toml");
     config_path
 }
 
@@ -344,7 +287,7 @@ mod tests {
     use clap::{CommandFactory, Parser};
     use parameterized::parameterized;
 
-    use super::{Config, Opts, PortRange, ScanOrder, ScriptsRequired};
+    use super::{Config, Opts, PortRange, ScanOrder};
 
     impl Config {
         fn default() -> Self {
@@ -352,20 +295,15 @@ mod tests {
                 addresses: Some(vec!["127.0.0.1".to_owned()]),
                 ports: None,
                 range: None,
-                greppable: Some(true),
                 batch_size: Some(25_000),
                 timeout: Some(1_000),
                 tries: Some(1),
                 ulimit: None,
-                command: Some(vec!["-A".to_owned()]),
-                accessible: Some(true),
                 resolver: None,
                 scan_order: Some(ScanOrder::Random),
-                scripts: None,
                 exclude_ports: None,
                 exclude_addresses: None,
                 udp: Some(false),
-                no_banner: None,
             }
         }
     }
@@ -376,23 +314,15 @@ mod tests {
     }
 
     #[parameterized(input = {
-        vec!["rustscan", "--addresses", "127.0.0.1"],
-        vec!["rustscan", "--addresses", "127.0.0.1", "--", "-sCV"],
-        vec!["rustscan", "--addresses", "127.0.0.1", "--", "-A"],
-        vec!["rustscan", "-t", "1500", "-a", "127.0.0.1", "--", "-A", "-sC"],
-        vec!["rustscan", "--addresses", "127.0.0.1", "--", "--script", r#""'(safe and vuln)'""#],
-    }, command = {
-        vec![],
-        vec!["-sCV".to_owned()],
-        vec!["-A".to_owned()],
-        vec!["-A".to_owned(), "-sC".to_owned()],
-        vec!["--script".to_owned(), "\"'(safe and vuln)'\"".to_owned()],
+        vec!["netscope-scan", "--addresses", "127.0.0.1"],
+        vec!["netscope-scan", "--addresses", "127.0.0.1,192.168.0.1"],
+    }, expected_addresses = {
+        vec!["127.0.0.1".to_owned()],
+        vec!["127.0.0.1".to_owned(), "192.168.0.1".to_owned()],
     })]
-    fn parse_trailing_command(input: Vec<&str>, command: Vec<String>) {
+    fn parse_addresses(input: Vec<&str>, expected_addresses: Vec<String>) {
         let opts = Opts::parse_from(input);
-
-        assert_eq!(vec!["127.0.0.1".to_owned()], opts.addresses);
-        assert_eq!(command, opts.command);
+        assert_eq!(expected_addresses, opts.addresses);
     }
 
     #[test]
@@ -403,10 +333,7 @@ mod tests {
         opts.merge(&config);
 
         assert_eq!(opts.addresses, vec![] as Vec<String>);
-        assert!(opts.greppable);
-        assert!(!opts.accessible);
         assert_eq!(opts.timeout, 0);
-        assert_eq!(opts.command, vec![] as Vec<String>);
         assert_eq!(opts.scan_order, ScanOrder::Serial);
     }
 
@@ -418,12 +345,8 @@ mod tests {
         opts.merge_required(&config);
 
         assert_eq!(opts.addresses, config.addresses.unwrap());
-        assert_eq!(opts.greppable, config.greppable.unwrap());
         assert_eq!(opts.timeout, config.timeout.unwrap());
-        assert_eq!(opts.command, config.command.unwrap());
-        assert_eq!(opts.accessible, config.accessible.unwrap());
         assert_eq!(opts.scan_order, config.scan_order.unwrap());
-        assert_eq!(opts.scripts, ScriptsRequired::Default);
     }
 
     #[test]

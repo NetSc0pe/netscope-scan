@@ -14,15 +14,14 @@ use hickory_resolver::{
 use log::debug;
 
 use crate::input::Opts;
-use crate::warning;
 
 /// Parses the string(s) into IP addresses.
 ///
 /// Goes through all possible IP inputs (files or via argparsing).
 ///
 /// ```rust
-/// # use rustscan::input::Opts;
-/// # use rustscan::address::parse_addresses;
+/// # use netscope_scan::input::Opts;
+/// # use netscope_scan::address::parse_addresses;
 /// let mut opts = Opts::default();
 /// opts.addresses = vec!["192.168.0.0/30".to_owned()];
 ///
@@ -49,23 +48,14 @@ pub fn parse_addresses(input: &Opts) -> Vec<IpAddr> {
         let file_path = Path::new(file_path);
 
         if !file_path.is_file() {
-            warning!(
-                format!("Host {file_path:?} could not be resolved."),
-                input.greppable,
-                input.accessible
-            );
-
+            eprintln!("Host {:?} could not be resolved.", file_path);
             continue;
         }
 
         if let Ok(x) = read_ips_from_file(file_path, &backup_resolver) {
             ips.extend(x);
         } else {
-            warning!(
-                format!("Host {file_path:?} could not be resolved."),
-                input.greppable,
-                input.accessible
-            );
+            eprintln!("Host {:?} could not be resolved.", file_path);
         }
     }
 
@@ -87,7 +77,7 @@ pub fn parse_addresses(input: &Opts) -> Vec<IpAddr> {
 /// or resolve it by dns resolver list.
 ///
 /// ```rust
-/// # use rustscan::address::parse_address;
+/// # use netscope_scan::address::parse_address;
 /// # use hickory_resolver::Resolver;
 /// let ips = parse_address("127.0.0.1", &Resolver::default().unwrap());
 /// ```
@@ -132,7 +122,7 @@ fn resolve_ips_from_host(source: &str, backup_resolver: &Resolver) -> Vec<IpAddr
 /// 3. Hostnames that need to be resolved (e.g. "example.com")
 ///
 /// ```rust
-/// # use rustscan::address::parse_excluded_networks;
+/// # use netscope_scan::address::parse_excluded_networks;
 /// # use hickory_resolver::Resolver;
 /// let resolver = Resolver::default().unwrap();
 /// let excluded = parse_excluded_networks(&Some(vec!["192.168.0.0/24".to_owned()]), &resolver);
