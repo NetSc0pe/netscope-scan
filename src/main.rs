@@ -54,7 +54,18 @@ fn main() {
         opts.udp,
     );
 
-    let scan_result = block_on(scanner.run());
+    let raw_result = block_on(scanner.run());
+
+    let scan_result = if let Some(confirm_ms) = opts.confirm {
+        let confirm_timeout = Duration::from_millis(confirm_ms.into());
+        let before = raw_result.len();
+        let confirmed = block_on(scanner.confirm(raw_result, confirm_timeout));
+        let after = confirmed.len();
+        eprintln!("confirm: {before} candidates → {after} confirmed");
+        confirmed
+    } else {
+        raw_result
+    };
 
     let mut ports_per_ip: HashMap<IpAddr, Vec<u16>> = HashMap::new();
     for socket in scan_result {

@@ -122,6 +122,12 @@ pub struct Opts {
     /// UDP scanning mode, finds UDP ports that send back responses
     #[arg(long)]
     pub udp: bool,
+
+    /// Confirm discovered ports with a second TCP connect using a shorter timeout (milliseconds).
+    /// Ports that do not respond within this timeout are dropped from results.
+    /// Useful for filtering DROP-firewall false positives. Disabled when absent.
+    #[arg(long)]
+    pub confirm: Option<u32>,
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -177,7 +183,14 @@ impl Opts {
             self.ports = config.ports.clone();
         }
 
-        merge_optional!(range, resolver, ulimit, exclude_ports, exclude_addresses);
+        merge_optional!(
+            range,
+            resolver,
+            ulimit,
+            exclude_ports,
+            exclude_addresses,
+            confirm
+        );
     }
 }
 
@@ -199,6 +212,7 @@ impl Default for Opts {
             exclude_ports: None,
             exclude_addresses: None,
             udp: false,
+            confirm: None,
         }
     }
 }
@@ -219,6 +233,7 @@ pub struct Config {
     exclude_ports: Option<Vec<u16>>,
     exclude_addresses: Option<Vec<String>>,
     udp: Option<bool>,
+    confirm: Option<u32>,
 }
 
 #[cfg(not(tarpaulin_include))]

@@ -198,6 +198,42 @@ impl Scanner {
         )))
     }
 
+    /// Confirms a list of candidate sockets with a second TCP connect at a shorter timeout.
+    /// Runs all sockets concurrently in batches of `self.batch_size`.
+    /// Returns only those that successfully connect, filtering DROP-firewall false positives.
+    pub async fn confirm(&self, sockets: Vec<SocketAddr>, timeout: Duration) -> Vec<SocketAddr> {
+        let mut ftrs = FuturesUnordered::new();
+        let mut confirmed: Vec<SocketAddr> = Vec::new();
+        let mut socket_iter = sockets.into_iter();
+
+        for _ in 0..self.batch_size {
+            if let Some(socket) = socket_iter.next() {
+                ftrs.push(Self::confirm_socket(socket, timeout));
+            } else {
+                break;
+            }
+        }
+
+        while let Some(result) = ftrs.next().await {
+            if let Some(socket) = socket_iter.next() {
+                ftrs.push(Self::confirm_socket(socket, timeout));
+            }
+            if let Ok(socket) = result {
+                confirmed.push(socket);
+            }
+        }
+
+        confirmed
+    }
+
+    async fn confirm_socket(socket: SocketAddr, timeout: Duration) -> io::Result<SocketAddr> {
+        let stream = io::timeout(timeout, async move { TcpStream::connect(socket).await }).await?;
+        if let Err(e) = stream.shutdown(Shutdown::Both) {
+            debug!("confirm shutdown error {e}");
+        }
+        Ok(socket)
+    }
+
     /// Performs the connection to the socket with timeout
     /// # Example
     ///
